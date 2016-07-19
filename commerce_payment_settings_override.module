@@ -1,0 +1,60 @@
+<?php
+
+/**
+ * Implements hook_entity_load().
+ */
+function commerce_payment_settings_override_entity_load($entities, $type) {
+  if ($type != 'rules_config') {
+    return;
+  }
+  foreach ($entities as $entity) {
+    // Skip Config Rules that are not provided by Commerce Payment.
+    if (strpos($entity->name, 'commerce_payment_') !== 0) {
+      continue;
+    }
+    foreach ($entity->actions() as $name => $action) {
+      if (is_callable(array($action, 'getElementName')) && strpos($action->getElementName(), 'commerce_payment_enable_') === 0) {
+        if (is_array($action->settings['payment_method']) && !empty($action->settings['payment_method']['settings'])) {
+          // Check if payment settings override information exist.
+          $settings = variable_get('commerce_payment_' . $action->settings['payment_method']['method_id'] . '_settings', array());
+
+          if (!empty($settings) && is_array($settings)) {
+            $action->settings['payment_method']['settings'] = array_replace_recursive($action->settings['payment_method']['settings'], $settings);
+            $action->processSettings(TRUE);
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Disable payment method settings form elements that are overridden.
+ */
+function commerce_payment_settings_override_form_rules_ui_edit_element_alter(&$form, &$form_state) {
+  if (!isset($form['parameter']['payment_method'])) {
+    return;
+  }
+  $payment_method = &$form['parameter']['payment_method']['settings']['payment_method'];
+  $settings = variable_get('commerce_payment_' . $payment_method['method_id']['#value'] . '_settings', array());
+
+  if (!empty($settings) && is_array($settings)) {
+    $display_override_message = FALSE;
+
+    foreach (element_get_visible_children($payment_method['settings']) as $key) {
+      if (isset($settings[$key]) && isset($payment_method['settings'][$key])) {
+        $payment_method['settings'][$key]['#disabled'] = TRUE;
+        $payment_method['settings'][$key]['#required'] = FALSE;
+        $display_override_message = TRUE;
+      }
+    }
+
+    // Display a warning message below the payment settings to warn the user
+    // about the fields that can't be overridden.
+    if ($display_override_message) {
+      drupal_set_message(t("Some fields are defined in your settings.local.php and can't be overridden."), "warning");
+    }
+  }
+}
